@@ -7,6 +7,7 @@ public class RebootPermisssions {
     public static final String COMMAND_TIME = "mmcreboot.reboot.time";
 
     //staff permissions
+    public static final String COMMAND_RELOAD = "mmcreboot.reboot.reload";
     public static final String COMMAND_NOW = "mmcreboot.reboot.now";
     public static final String COMMAND_START = "mmcreboot.reboot.start";
     public static final String COMMAND_CANCEL = "mmcreboot.reboot.cancel";

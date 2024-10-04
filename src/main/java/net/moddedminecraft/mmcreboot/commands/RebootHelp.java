@@ -20,16 +20,16 @@ public class RebootHelp {
 
     public int execute(ServerCommandSource source) {
         List<Text> contents = new ArrayList<>();
-        contents.add(Main.fromLegacy(Messages.getHelpHelp()));
-        if (Permissions.check(source, RebootPermisssions.COMMAND_NOW)) contents.add(Main.fromLegacy(Messages.getHelpNow()));
-        if (Permissions.check(source, RebootPermisssions.COMMAND_START)) contents.add(Main.fromLegacy(Messages.getHelpStart()));
-        if (Permissions.check(source, RebootPermisssions.COMMAND_CANCEL)) contents.add(Main.fromLegacy(Messages.getHelpCancel()));
-        if (Permissions.check(source, RebootPermisssions.COMMAND_VOTE)) contents.add(Main.fromLegacy(Messages.getHelpVote()));
-        if (Permissions.check(source, RebootPermisssions.COMMAND_TIME)) contents.add(Main.fromLegacy(Messages.getHelpTime()));
-        contents.add(Main.fromLegacy(Messages.getHelpVoteYea()));
-        contents.add(Main.fromLegacy(Messages.getHelpVoteNo()));
+        contents.add(Main.fromPlaceholderAPI(Messages.getHelpHelp()));
+        if (Permissions.check(source, RebootPermisssions.COMMAND_NOW, 4)) contents.add(Main.fromPlaceholderAPI(Messages.getHelpNow()));
+        if (Permissions.check(source, RebootPermisssions.COMMAND_START, 4)) contents.add(Main.fromPlaceholderAPI(Messages.getHelpStart()));
+        if (Permissions.check(source, RebootPermisssions.COMMAND_CANCEL, 4)) contents.add(Main.fromPlaceholderAPI(Messages.getHelpCancel()));
+        if (Permissions.check(source, RebootPermisssions.COMMAND_VOTE, 4)) contents.add(Main.fromPlaceholderAPI(Messages.getHelpVote()));
+        if (Permissions.check(source, RebootPermisssions.COMMAND_TIME, 4)) contents.add(Main.fromPlaceholderAPI(Messages.getHelpTime()));
+        contents.add(Main.fromPlaceholderAPI(Messages.getHelpVoteYea()));
+        contents.add(Main.fromPlaceholderAPI(Messages.getHelpVoteNo()));
 
-        source.sendMessage(Main.fromLegacy("&6MMCReboot Help"));
+        source.sendMessage(Main.fromPlaceholderAPI("<gold>MMCReboot Help</gold>"));
         for (Text text : contents) {
             source.sendMessage(text);
         }

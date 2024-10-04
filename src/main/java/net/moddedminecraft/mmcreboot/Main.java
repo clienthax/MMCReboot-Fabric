@@ -1,12 +1,19 @@
 package net.moddedminecraft.mmcreboot;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import eu.pb4.placeholders.api.TextParserUtils;
 import me.fzzyhmstrs.fzzy_config.api.ConfigApiJava;
-import net.fabricmc.api.DedicatedServerModInitializer;
+import me.lucko.fabric.api.permissions.v0.Permissions;
+import me.lucko.spark.api.SparkProvider;
+import me.lucko.spark.api.statistic.StatisticWindow;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.command.CommandSource;
+import net.minecraft.entity.boss.BossBar;
 import net.minecraft.entity.boss.ServerBossBar;
 import net.minecraft.network.packet.s2c.play.SubtitleS2CPacket;
 import net.minecraft.network.packet.s2c.play.TitleFadeS2CPacket;
@@ -24,7 +31,9 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.Identifier;
 import net.minecraft.world.World;
-import net.moddedminecraft.mmcreboot.Tasks.MainThreadTaskScheduler;
+import net.moddedminecraft.mmcreboot.Config.RebootPermisssions;
+import net.moddedminecraft.mmcreboot.Tasks.ScheduledTaskManager;
+import net.moddedminecraft.mmcreboot.Tasks.ServerTickMixinAccessor;
 import org.slf4j.Logger;
 
 import net.moddedminecraft.mmcreboot.Config.Config;
@@ -36,8 +45,6 @@ import org.slf4j.LoggerFactory;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -47,8 +54,6 @@ public class Main implements ModInitializer {
 
     public static final String MOD_ID = "mmcreboot";
     public static final Logger logger = LoggerFactory.getLogger(MOD_ID);
-
-    private final ScheduledExecutorService asyncExecutorService = Executors.newScheduledThreadPool(10);
 
     public boolean voteCancel = false;
     public boolean cdTimer = false;
@@ -69,11 +74,6 @@ public class Main implements ModInitializer {
     public boolean tasksScheduled = false;
     public double nextRealTimeRestart;
 
-    // Timers
-    private final ArrayList<Timer> warningTimers = new ArrayList<Timer>();
-    private Timer rebootTimer;
-    private Timer justStartedTimer;
-
     private boolean playSoundNow = false;
     private int soundLocX;
     private int soundLocY;
@@ -88,18 +88,12 @@ public class Main implements ModInitializer {
 
     private MinecraftServer server;
 
+    private List<Runnable> rebootTimerTasks = new ArrayList<>();
 
     @Override
     public void onInitialize() {
-        // Tests
-        onInitializeServer();
-    }
 
-    public void onInitializeServer() {
-
-        //this.config = new Config(this);
         this.config = ConfigApiJava.registerAndLoadConfig(Config::new);
-
         this.messages = new Messages(this);
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> registerCommands(dispatcher));
@@ -139,41 +133,34 @@ public class Main implements ModInitializer {
             logger.info("[MMCReboot] No automatic restarts scheduled!");
         }
 
+
         if (config.voting.voteEnabled) {
-            justStartedTimer = new Timer();
-            this.justStartedTimer.schedule(new TimerTask() {
-                public void run() {
-                    justStarted = false;
-                }
-            }, (long) config.timer.timerStartvote * 60 * 1000);
+            getTaskManager().scheduleSingleTask(() -> justStarted = false, config.timer.timerStartvote, TimeUnit.MINUTES);
         }
 
         // mmcreboot-a-sendAction
-        asyncExecutorService.scheduleAtFixedRate(this::action, 250, 500, TimeUnit.MILLISECONDS);
+        getTaskManager().scheduleRepeatingTask(this::action, 250, 500, TimeUnit.MILLISECONDS);
 
         // mmcreboot-a-reduceVoteCount
-        asyncExecutorService.scheduleAtFixedRate(this::reduceVote, 0, 1, TimeUnit.SECONDS);
+        getTaskManager().scheduleRepeatingTask(this::reduceVote, 0, 1, TimeUnit.SECONDS);
 
         // mmcreboot-a-checkRealTimeRestart
-        asyncExecutorService.scheduleAtFixedRate(this::checkRealTimeRestart, 60, 15, TimeUnit.MINUTES);
+        getTaskManager().scheduleRepeatingTask(this::checkRealTimeRestart, 60, 15, TimeUnit.MINUTES);
 
         // mmcreboot-a-checkTPSForRestart
-        asyncExecutorService.scheduleAtFixedRate(this::CheckTPSForRestart, config.tps.tpsCheckDelay, 30, TimeUnit.SECONDS);
-
-        MainThreadTaskScheduler.init();
+        getTaskManager().scheduleRepeatingTask(this::CheckTPSForRestart, config.tps.tpsCheckDelay, 30, TimeUnit.SECONDS);
 
         logger.info("MMCReboot Loaded");
     }
 
     public void onServerStop(MinecraftServer server) {
-        cancelTasks();
+        cancelRebootTimerTasks();
         logger.info("MMCReboot Disabled");
     }
 
-    // No reload for fabric plugins??
-    // TODO hook to a command?
+    // No reload for fabric plugins, uses a command instead
     public void onPluginReload() {
-        cancelTasks();
+        cancelRebootTimerTasks();
         removeScoreboard();
         removeBossBar();
         isRestarting = false;
@@ -201,86 +188,96 @@ public class Main implements ModInitializer {
     private void registerCommands(CommandDispatcher<ServerCommandSource> dispatcher) {
 
         // /Reboot help
+        RebootHelp rebootHelp = new RebootHelp(this);
         dispatcher.register(CommandManager.literal("reboot")
                 .then(CommandManager.literal("help")
-                        .executes(context -> {
-                            new RebootHelp(this).execute(context.getSource());
-                            return 1;
-                        })
+                        .executes(context -> rebootHelp.execute(context.getSource()))
                 )
         );
 
-        /*
-        // /Reboot vote
-        CommandSpec vote = CommandSpec.builder()
-                .description(Text.of("Submit a vote to reboot the server"))
-                .executor(new RebootVote(this))
-                .arguments(GenericArguments.optional(GenericArguments.remainingJoinedStrings(Text.of("optional"))))
-                .build();
+        RebootVote rebootVote = new RebootVote(this);
+        dispatcher.register(CommandManager.literal("reboot")
+                .then(CommandManager.literal("vote")
+                        .then(CommandManager.argument("op", StringArgumentType.word())
+                                .suggests((context, builder) -> CommandSource.suggestMatching(new String[]{"on", "off", "yes", "no"}, builder))
+                                .executes(rebootVote::executeSubcommand))
+                        .executes(rebootVote::executeBase)
+
+                )
+        );
 
         // /Reboot cancel
-        CommandSpec cancel = CommandSpec.builder()
-                .description(Text.of("Cancel the current timed reboot"))
-                .permission(RebootPermisssions.COMMAND_CANCEL)
-                .executor(new RebootCancel(this))
-                .build();
+        RebootCancel rebootCancel = new RebootCancel(this);
+        dispatcher.register(CommandManager.literal("reboot")
+                .then(CommandManager.literal("cancel")
+                        .requires(source -> Permissions.check(source, RebootPermisssions.COMMAND_CANCEL, 4))
+                        .executes(context -> rebootCancel.execute(context.getSource()))
+                )
+        );
 
         // /Reboot time
-        CommandSpec time = CommandSpec.builder()
-                .description(Text.of("Get the time remaining until the next restart"))
-                .permission(RebootPermisssions.COMMAND_TIME)
-                .executor(new RebootTime(this))
-                .build();
+        RebootTime rebootTime = new RebootTime(this);
+        dispatcher.register(CommandManager.literal("reboot")
+                .then(CommandManager.literal("time")
+                        .requires(source -> Permissions.check(source, RebootPermisssions.COMMAND_TIME, 4))
+                        .executes(context -> rebootTime.execute(context.getSource()))
+                )
+        );
 
         // /Reboot confirm
-        CommandSpec confirm = CommandSpec.builder()
-                .description(Text.of("Reboot the server immediately"))
-                .permission(RebootPermisssions.COMMAND_NOW)
-                .executor(new RebootConfirm(this))
-                .build();
-        // /Reboot now
-        CommandSpec now = CommandSpec.builder()
-                .description(Text.of("Reboot the server immediately"))
-                .permission(RebootPermisssions.COMMAND_NOW)
-                .executor(new RebootNow(this))
-                .build();
+        RebootConfirm rebootConfirm = new RebootConfirm(this);
+        dispatcher.register(CommandManager.literal("reboot")
+                .then(CommandManager.literal("confirm")
+                        .requires(source -> Permissions.check(source, RebootPermisssions.COMMAND_NOW, 4))
+                        .executes(context -> rebootConfirm.execute(context.getSource()))
+                )
+        );
 
-        Map<String, String> choices = new HashMap<>() {
-            {
-                put("h", "h");
-                put("m", "m");
-                put("s", "s");
-            }
-        };
+        // /Reboot now
+        RebootNow rebootNow = new RebootNow(this);
+        dispatcher.register(CommandManager.literal("reboot")
+                .then(CommandManager.literal("now")
+                        .requires(source -> Permissions.check(source, RebootPermisssions.COMMAND_NOW, 4))
+                        .executes(context -> rebootNow.execute(context.getSource()))
+                )
+        );
 
         // /Reboot start h/m/s time reason
-        CommandSpec start = CommandSpec.builder()
-                .description(Text.of("Reboot base command"))
-                .permission(RebootPermisssions.COMMAND_START)
-                .arguments(GenericArguments.choices(Text.of("h/m/s"), choices),
-                        GenericArguments.integer(Text.of("time")),
-                        GenericArguments.optional(GenericArguments.remainingJoinedStrings(Text.of("reason"))))
-                .executor(new RebootCMD(this))
-                .build();
+        RebootCMD rebootCMD = new RebootCMD(this);
+        dispatcher.register(CommandManager.literal("reboot")
+                .then(CommandManager.literal("start")
+                        .requires(source -> Permissions.check(source, RebootPermisssions.COMMAND_START, 4))
+                        .then(CommandManager.argument("unit", StringArgumentType.word())
+                                .suggests((context, builder) -> CommandSource.suggestMatching(new String[]{"h", "m", "s"}, builder))
+                                .then(CommandManager.argument("time", IntegerArgumentType.integer())
+                                        .then(CommandManager.argument("reason", StringArgumentType.greedyString())
+                                                .executes(rebootCMD::execute))
+                                        .executes(rebootCMD::execute)
+                                )
+                        )
+                )
+        );
 
-        CommandSpec rbootmain = CommandSpec.builder()
-                .description(Text.of("Reboot base command"))
-                .child(start, "start")
-                .child(now, "now")
-                .child(confirm, "confirm")
-                .child(time, "time")
-                .child(cancel, "cancel")
-                .child(vote, "vote")
-                .child(help, "help")
-                .build();
-
-        cmdManager.register(this, rbootmain, "reboot", "restart");*/
+        // /Reboot reload
+        dispatcher.register(CommandManager.literal("reboot")
+                .then(CommandManager.literal("reload")
+                        .requires(source -> Permissions.check(source, RebootPermisssions.COMMAND_RELOAD, 4))
+                        .executes(context -> {
+                            onPluginReload();
+                            context.getSource().sendFeedback(() -> fromPlaceholderAPI("<green>Reloaded MMCReboot</green>"), true);
+                            return 1;
+                        }
+                ))
+        );
     }
 
-    // TODO: How can we do this in fabric?
     public Double getTPS() {
-        //return Sponge.getServer().getTicksPerSecond();
-        return 20d;
+        try {
+            return Objects.requireNonNull(SparkProvider.get().tps()).poll(StatisticWindow.TicksPerSecond.MINUTES_5);
+        } catch (Exception e) {
+            // Spark is not loaded
+            return 20d;
+        }
     }
 
     public boolean getTPSRestarting() {
@@ -298,24 +295,21 @@ public class Main implements ModInitializer {
             int minutes = (int) ((timeLeft - hours * 3600) / 60);
             if (hours == 0 && minutes > 20 || hours > 0) {
                 setTPSRestarting(true);
-                Timer warnTimer = new Timer();
-                warningTimers.add(warnTimer);
-                warnTimer.schedule(new TimerTask() {
-                    @Override
-                    public void run() {
-                        if (getTPS() < config.tps.tpsMinimum) {
-                            isRestarting = true;
-                            config.autorestart.restartInterval = (config.tps.tpsTimer + 1) / 3600.0;
-                            logger.info("[MMCReboot] scheduling restart tasks...");
-                            if (config.tps.tpsUseReason) {
-                                reason = config.tps.tpsMessage;
-                            }
-                            scheduleTasks();
-                        } else {
-                            setTPSRestarting(false);
+                Runnable runnable = () -> {
+                    if (getTPS() < config.tps.tpsMinimum) {
+                        isRestarting = true;
+                        config.autorestart.restartInterval = (config.tps.tpsTimer + 1) / 3600.0;
+                        logger.info("[MMCReboot] scheduling restart tasks...");
+                        if (config.tps.tpsUseReason) {
+                            reason = config.tps.tpsMessage;
                         }
+                        scheduleTasks();
+                    } else {
+                        setTPSRestarting(false);
                     }
-                }, 15000);
+                };
+                rebootTimerTasks.add(runnable);
+                getTaskManager().scheduleSingleTask(runnable, 15, TimeUnit.SECONDS);
             }
         }
     }
@@ -353,14 +347,15 @@ public class Main implements ModInitializer {
     }
 
     public void scheduleRealTimeRestart() {
-        cancelTasks();
+        cancelRebootTimerTasks();
         nextRealTimeRestart = getNextRealTimeFromConfig();
         double rInterval = nextRealTimeRestart;
         if (config.timer.timerBroadcast != null) {
             warningMessages(rInterval);
         }
-        rebootTimer = new Timer();
-        rebootTimer.schedule(new ShutdownTask(this), (long) (nextRealTimeRestart * 1000.0));
+        ShutdownTask task = new ShutdownTask(this);
+        rebootTimerTasks.add(task);
+        getTaskManager().scheduleSingleTask(task, nextRealTimeRestart, TimeUnit.SECONDS);
 
         logger.info("[MMCReboot] RebootCMD scheduled for " + (long)(nextRealTimeRestart) + " seconds from now!");
         tasksScheduled = true;
@@ -370,18 +365,15 @@ public class Main implements ModInitializer {
 
     public void scheduleTasks() {
         boolean wasTPSRestarting = getTPSRestarting();
-        cancelTasks();
-        if (wasTPSRestarting) {
-            setTPSRestarting(true);
-        } else {
-            setTPSRestarting(false);
-        }
+        cancelRebootTimerTasks();
+        setTPSRestarting(wasTPSRestarting);
         double rInterval = config.autorestart.restartInterval * 3600;
         if (config.timer.timerBroadcast != null) {
             warningMessages(rInterval);
         }
-        rebootTimer = new Timer();
-        rebootTimer.schedule(new ShutdownTask(this), (long) (config.autorestart.restartInterval * 3600000.0));
+        ShutdownTask task = new ShutdownTask(this);
+        rebootTimerTasks.add(task);
+        getTaskManager().scheduleSingleTask(task, config.autorestart.restartInterval, TimeUnit.HOURS);
 
         logger.info("[MMCReboot] RebootCMD scheduled for " + (long)(config.autorestart.restartInterval  * 3600.0) + " seconds from now!");
         tasksScheduled = true;
@@ -390,45 +382,44 @@ public class Main implements ModInitializer {
     }
 
     private void warningMessages(double rInterval) {
+
         config.timer.timerBroadcast.stream().filter(aTimerBroadcast -> rInterval * 60 - aTimerBroadcast > 0).forEach(aTimerBroadcast -> {
-            Timer warnTimer = new Timer();
-            warningTimers.add(warnTimer);
             if (aTimerBroadcast <= rInterval) {
-                warnTimer.schedule(new TimerTask() {
-                    public void run() {
-                        double timeLeft = rInterval - ((double) (System.currentTimeMillis() - startTimestamp) / 1000);
-                        int hours = (int) (timeLeft / 3600);
-                        int minutes = (int) ((timeLeft - hours * 3600) / 60);
-                        int seconds = (int) timeLeft % 60;
+                Runnable runnable = () -> {
+                    double timeLeft = rInterval - ((double) (System.currentTimeMillis() - startTimestamp) / 1000);
+                    int hours = (int) (timeLeft / 3600);
+                    int minutes = (int) ((timeLeft - hours * 3600) / 60);
+                    int seconds = (int) timeLeft % 60;
 
-                        NumberFormat formatter = new DecimalFormat("00");
-                        String s = formatter.format(seconds);
-                        if (config.timer.timerUseChat) {
-                            if (minutes > 1) {
-                                String message = Messages.getRestartNotificationMinutes().replace("%minutes%", "" + minutes).replace("%seconds%", "" + s);
-                                broadcastMessage("&f[&6Restart&f] " + message);
-                            } else if (minutes == 1) {
-                                String message = Messages.getRestartNotificationMinute().replace("%minutes%", "" + minutes).replace("%seconds%", "" + s);
-                                broadcastMessage("&f[&6Restart&f] " + message);
-                            } else {
-                                String message = Messages.getRestartNotificationSeconds().replace("%minutes%", "" + minutes).replace("%seconds%", "" + s);
-                                broadcastMessage("&f[&6Restart&f] " + message);
-                            }
+                    NumberFormat formatter = new DecimalFormat("00");
+                    String s = formatter.format(seconds);
+                    if (config.timer.timerUseChat) {
+                        if (minutes > 1) {
+                            String message = Messages.getRestartNotificationMinutes().replace("%minutes%", "" + minutes).replace("%seconds%", s);
+                            broadcastMessage("<white>[</white><gold>Restart</gold><white>] </white>" + message);
+                        } else if (minutes == 1) {
+                            String message = Messages.getRestartNotificationMinute().replace("%minutes%", "" + minutes).replace("%seconds%", s);
+                            broadcastMessage("<white>[</white><gold>Restart</gold><white>] </white>" + message);
+                        } else {
+                            String message = Messages.getRestartNotificationSeconds().replace("%minutes%", "" + minutes).replace("%seconds%", s);
+                            broadcastMessage("<white>[</white><gold>Restart</gold><white>] </white>" + message);
                         }
-                        logger.info("[MMCReboot] " + "&bThe server will be restarting in &f" + hours + "h" + minutes + "m" + seconds + "s");
-                        if (!playSoundNow && config.timer.playSoundFirstTime >= aTimerBroadcast) {
-                            playSoundNow = true;
-                        }
-
-                        playGlobalSound();
-                        updateTitles(hours, minutes, s);
-
-                        if (reason != null) {
-                            broadcastMessage("&f[&6Restart&f] &d" + reason);
-                        }
-                        isRestarting = true;
                     }
-                }, (long) ((rInterval - aTimerBroadcast) * 1000.0));
+                    logger.info("[MMCReboot] " + "The server will be restarting in " + hours + "h" + minutes + "m" + seconds + "s");
+                    if (!playSoundNow && config.timer.playSoundFirstTime >= aTimerBroadcast) {
+                        playSoundNow = true;
+                    }
+
+                    playGlobalSound();
+                    updateTitles(hours, minutes, s);
+
+                    if (reason != null) {
+                        broadcastMessage("<white>[</white><gold>Restart</gold><white>] </white><light_purple>" + reason + "</light_purple>");
+                    }
+                    isRestarting = true;
+                };
+                rebootTimerTasks.add(runnable);
+                getTaskManager().scheduleSingleTask(runnable, (long) ((rInterval - aTimerBroadcast)), TimeUnit.SECONDS);
                 logger.info("[MMCReboot] warning scheduled for " + (long) (rInterval - aTimerBroadcast) + " seconds from now!");
             }
         });
@@ -439,10 +430,13 @@ public class Main implements ModInitializer {
             return;
         }
 
-        Text title = fromLegacy(config.timer.titleMessage.replace("{hours}", "" + hours).replace("{minutes}", "" + minutes).replace("{seconds}", s));
-        Text subtitle = Text.empty();
-        if (reason != null) {
-            subtitle = fromLegacy(reason);
+        Text title = fromPlaceholderAPI(config.timer.titleMessage.replace("{hours}", "" + hours).replace("{minutes}", "" + minutes).replace("{seconds}", s));;
+        Text subtitle;
+        if (reason != null && !reason.isEmpty()) {
+            subtitle = fromPlaceholderAPI(reason);
+        } else {
+            title = Text.of("");
+            subtitle = title;
         }
 
         TitleS2CPacket titlePacket = new TitleS2CPacket(title);
@@ -468,13 +462,8 @@ public class Main implements ModInitializer {
         }
     }
 
-    public void cancelTasks() {
-        for (Timer warningTimer : warningTimers) warningTimer.cancel();
-        warningTimers.clear();
-        if(rebootTimer != null) {
-            rebootTimer.cancel();
-        }
-        rebootTimer = new Timer();
+    public void cancelRebootTimerTasks() {
+        getTaskManager().removeTasks(rebootTimerTasks);
         tasksScheduled = false;
         isRestarting = false;
         TPSRestarting = false;
@@ -484,27 +473,24 @@ public class Main implements ModInitializer {
 
     public void stopServer() {
         logger.info("[MMCReboot] Restarting...");
+
         isRestarting = false;
-        broadcastMessage("&cServer is restarting, we'll be right back!");
+        broadcastMessage("<red>Server is restarting, we'll be right back!</red>");
         try {
             if (config.kickmessage.isEmpty()) {
                 Text reason = Text.of("Server is restarting, we'll be right back!");
                 server.getPlayerManager().getPlayerList().forEach(player -> player.networkHandler.disconnect(reason));
             } else {
-                server.getPlayerManager().getPlayerList().forEach(player -> player.networkHandler.disconnect(fromLegacy(config.kickmessage)));
+                server.getPlayerManager().getPlayerList().forEach(player -> player.networkHandler.disconnect(fromPlaceholderAPI(config.kickmessage)));
             }
             // mmcreboot-s-shutdown
-            MainThreadTaskScheduler.scheduleTask(this::shutdown, 1, TimeUnit.SECONDS);
+            getTaskManager().scheduleSingleTask(() -> server.stop(false), 1, TimeUnit.SECONDS);
         } catch (Exception e) {
             logger.info("[MMCReboot] Something went wrong while saving & stopping!");
             logger.info("Exception: " + e);
-            broadcastMessage("&cServer has encountered an error while restarting.");
+            broadcastMessage("<red>Server has encountered an error while restarting.</red>");
+            e.printStackTrace();
         }
-    }
-
-    public void shutdown() {
-        server.saveAll(false, true, true);
-        server.shutdown();
     }
 
     public int getNextRealTimeFromConfig() {
@@ -576,68 +562,51 @@ public class Main implements ModInitializer {
         double val = ((double) ((mSec + seconds) * 100) / 300);
         float percent = (float)val / 100.0f;
 
-
-
-        // TODO: Implement this
-        /*
-        Sponge.getServer().getOnlinePlayers().stream().filter(player -> minutes < 5 && hours == 0).forEach(player -> {
-            player.setScoreboard(board);
-            if (Config.bossbarEnabled) {
-                if (bar == null) {
-                    bar = ServerBossBar.builder()
-                            .name(Text.of(Config.bossbarTitle.replace("{minutes}", Integer.toString(minutes)).replace("{seconds}", s)))
-                            .color(BossBarColors.GREEN)
-                            .overlay(BossBarOverlays.PROGRESS)
-                            .percent(percent)
-                            .build();
-                } else {
-                    bar.setPercent(percent);
-                }
-                bar.addPlayer(player);
+        if (config.bossBar.bossbarEnabled) {
+            if (bar == null) {
+                bar = new ServerBossBar(Text.of(config.bossBar.bossbarTitle.replace("{minutes}", Integer.toString(minutes)).replace("{seconds}", s)), BossBar.Color.GREEN, BossBar.Style.PROGRESS);
+            } else {
+                bar.setPercent(percent);
             }
-        });*/
+        }
+
+        server.getPlayerManager().getPlayerList().forEach(player -> {
+            if (!config.bossBar.bossbarEnabled) {
+                return;
+            }
+
+            bar.addPlayer(player);
+        });
     }
 
 
     public void displayVotes() {
-        /*
-        board = Scoreboard.builder().build();
-
-        ScoreboardObjective obj = ScoreboardObjective.builder().name("vote").criterion(Criteria.DUMMY).displayName(Text.of(Messages.getSidebarTitle())).build();
-
-        board.addObjective(obj);
-        board.updateDisplaySlot(obj, DisplaySlots.SIDEBAR);
-
-        obj.getOrCreateScore(Text.builder(Messages.getSidebarYes() + ":").color(TextColors.GREEN).build()).setScore(yesVotes);
-        obj.getOrCreateScore(Text.builder(Messages.getSidebarNo() + ":").color(TextColors.AQUA).build()).setScore(noVotes);
-        obj.getOrCreateScore(Text.builder(Messages.getSidebarTimeleft() + ":").color(TextColors.RED).build()).setScore(getTimeLeftInSeconds());
-
-
-        for (Player player : Sponge.getServer().getOnlinePlayers()) {
-            player.setScoreboard(board);
+        if (board == null) {
+            board = new Scoreboard();
         }
 
-         */
-        // TODO: Implement this
+        ScoreboardObjective obj = board.addObjective("vote", ScoreboardCriterion.DUMMY, Text.of(Messages.getSidebarTitle()), ScoreboardCriterion.RenderType.INTEGER);
+        board.getPlayerScore(Messages.getSidebarYes() + ":", obj).setScore(yesVotes);
+        board.getPlayerScore(Messages.getSidebarNo() + ":", obj).setScore(noVotes);
+        board.getPlayerScore(Messages.getSidebarTimeleft() + ":", obj).setScore(getTimeLeftInSeconds());
+
+        server.getPlayerManager().getPlayerList().forEach(player -> player.getScoreboard().setObjectiveSlot(1, obj)); // 1 for SIDEBAR
     }
 
-    public  void removeScoreboard() {
-        // TODO: Implement this
-
-        //for (Player player : Sponge.getServer().getOnlinePlayers()) {
-        //    player.getScoreboard().clearSlot(DisplaySlots.SIDEBAR);
-        //}
+    public void removeScoreboard() {
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            player.getScoreboard().setObjectiveSlot(1, null); // Clear sidebar
+        }
     }
 
-    public  void removeBossBar() {
-        // TODO: Implement this
-        //if (bar != null) {
-        //    bar.removePlayers(bar.getPlayers());
-        //}
+    public void removeBossBar() {
+        if (bar != null) {
+            bar.getPlayers().forEach(bar::removePlayer);
+        }
     }
 
     public void broadcastMessage(String message) {
-        server.sendMessage(fromLegacy(message));
+        server.sendMessage(fromPlaceholderAPI(message));
     }
 
     public void broadcastMessage(Text message) {
@@ -645,12 +614,11 @@ public class Main implements ModInitializer {
     }
 
     public void sendMessage(ServerCommandSource sender, String message) {
-        sender.sendMessage(fromLegacy(message));
+        sender.sendMessage(fromPlaceholderAPI(message));
     }
 
-    public static Text fromLegacy(String legacy) {
-        // TODO: Maybe?
-        return Text.of(legacy);
+    public static Text fromPlaceholderAPI(String message) {
+        return TextParserUtils.formatText(message);
     }
 
     public Config getConfig() {
@@ -659,6 +627,18 @@ public class Main implements ModInitializer {
 
     public int getOnlinePlayerCount() {
         return server.getPlayerManager().getPlayerList().size();
+    }
+
+    public void startRebootConfirmTimer(ServerCommandSource src) {
+        Runnable rebootConfirmationTask = () -> {
+            rebootConfirm = false;
+            sendMessage(src, Messages.getErrorTookTooLong());
+        };
+        getTaskManager().scheduleSingleTask(rebootConfirmationTask, 60, TimeUnit.SECONDS);
+    }
+
+    public ScheduledTaskManager getTaskManager() {
+        return ((ServerTickMixinAccessor) server).getTaskManager();
     }
 
 }

@@ -1,6 +1,5 @@
 package net.moddedminecraft.mmcreboot.commands;
 
-import net.minecraft.command.CommandException;
 import net.minecraft.server.command.ServerCommandSource;
 import net.moddedminecraft.mmcreboot.Config.Config;
 import net.moddedminecraft.mmcreboot.Config.Messages;
@@ -15,7 +14,8 @@ public class RebootTime {
 
     public int execute(ServerCommandSource src) {
         if(!plugin.tasksScheduled) {
-            throw new CommandException(Main.fromLegacy(Messages.getErrorNoTaskScheduled()));
+            src.sendError(Main.fromPlaceholderAPI(Messages.getErrorNoTaskScheduled()));
+            return -1;
         }
 
         Config config = plugin.getConfig();
@@ -42,7 +42,8 @@ public class RebootTime {
                     .replace("%seconds%", String.valueOf(seconds)));
             return 1;
         } else {
-            throw new CommandException(plugin.fromLegacy(Messages.getErrorNoTaskScheduled()));
+            src.sendError(Main.fromPlaceholderAPI(Messages.getErrorNoTaskScheduled()));
+            return -1;
         }
     }
 }

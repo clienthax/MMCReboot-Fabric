@@ -1,13 +1,10 @@
 package net.moddedminecraft.mmcreboot.Config;
 
-import com.google.common.reflect.TypeToken;
 import me.fzzyhmstrs.fzzy_config.annotations.Comment;
 import me.fzzyhmstrs.fzzy_config.config.ConfigSection;
 import net.minecraft.util.Identifier;
 import net.moddedminecraft.mmcreboot.Main;
 
-import java.io.IOException;
-import java.util.Arrays;
 import java.util.List;
 
 public class Config extends me.fzzyhmstrs.fzzy_config.config.Config {

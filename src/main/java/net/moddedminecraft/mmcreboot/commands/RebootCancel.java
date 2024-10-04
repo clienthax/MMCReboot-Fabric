@@ -4,8 +4,7 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.moddedminecraft.mmcreboot.Config.Messages;
 import net.moddedminecraft.mmcreboot.Main;
 
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.concurrent.TimeUnit;
 
 public class RebootCancel {
 
@@ -16,13 +15,8 @@ public class RebootCancel {
 
     public int execute(ServerCommandSource source) {
         plugin.voteCancel = true;
-        Timer voteCancelimer = new Timer();
-        voteCancelimer.schedule(new TimerTask() {
-            public void run() {
-                plugin.voteCancel = false;
-            }
-        }, (long) (15 * 60000.0));
-        plugin.cancelTasks();
+        plugin.getTaskManager().scheduleSingleTask(() -> plugin.voteCancel = false, 15, TimeUnit.MINUTES);
+        plugin.cancelRebootTimerTasks();
         plugin.removeScoreboard();
         plugin.removeBossBar();
         plugin.isRestarting = false;

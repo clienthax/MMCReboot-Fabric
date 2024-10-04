@@ -18,7 +18,7 @@ public class ShutdownTask extends TimerTask {
     public void run() {
 
         Runnable runnable = () -> {
-            plugin.cancelTasks();
+            plugin.cancelRebootTimerTasks();
             plugin.removeScoreboard();
             plugin.removeBossBar();
             plugin.useCommandOnRestart();
@@ -27,26 +27,26 @@ public class ShutdownTask extends TimerTask {
         Config config = plugin.getConfig();
         if (plugin.getTPSRestarting()) {
             if (plugin.getTPS() >= config.tps.tpsMinimum && config.tps.tpsRestartCancel) {
-                plugin.cancelTasks();
+                plugin.cancelRebootTimerTasks();
                 plugin.removeScoreboard();
                 plugin.removeBossBar();
                 plugin.isRestarting = false;
                 plugin.setTPSRestarting(false);
                 if (!config.tps.tpsRestartCancelMsg.isEmpty()) {
-                    plugin.broadcastMessage("&f[&6Restart&f] " + config.tps.tpsRestartCancelMsg);
+                    plugin.broadcastMessage("<white>[</white><gold>Restart</gold><white>] </white>" + config.tps.tpsRestartCancelMsg);
                 }
             } else if (plugin.getTPS() < config.tps.tpsMinimum) {
                 if (config.restart.restartUseCommand) {
-                    MainThreadTaskScheduler.scheduleTask(runnable, 1, TimeUnit.MILLISECONDS);
+                    plugin.getTaskManager().scheduleSingleTask(runnable, 1, TimeUnit.MILLISECONDS);
                 } else {
-                    MainThreadTaskScheduler.scheduleTask(plugin::stopServer, 1, TimeUnit.MILLISECONDS);
+                    plugin.getTaskManager().scheduleSingleTask(plugin::stopServer, 1, TimeUnit.MILLISECONDS);
                 }
             }
         } else {
             if (config.restart.restartUseCommand) {
-                MainThreadTaskScheduler.scheduleTask(runnable, 1, TimeUnit.MILLISECONDS);
+                plugin.getTaskManager().scheduleSingleTask(runnable, 1, TimeUnit.MILLISECONDS);
             } else {
-                MainThreadTaskScheduler.scheduleTask(plugin::stopServer, 1, TimeUnit.MILLISECONDS);
+                plugin.getTaskManager().scheduleSingleTask(plugin::stopServer, 1, TimeUnit.MILLISECONDS);
             }
         }
     }

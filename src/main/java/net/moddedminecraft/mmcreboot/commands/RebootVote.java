@@ -1,5 +1,6 @@
 package net.moddedminecraft.mmcreboot.commands;
 
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import me.lucko.fabric.api.permissions.v0.Permissions;
 import net.minecraft.command.CommandException;
@@ -12,6 +13,7 @@ import net.moddedminecraft.mmcreboot.Config.RebootPermisssions;
 import net.moddedminecraft.mmcreboot.Main;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 public class RebootVote {
 
@@ -20,19 +22,116 @@ public class RebootVote {
         plugin = instance;
     }
 
-    public int execute(ServerCommandSource src, CommandContext args) {
+    public int executeBase(CommandContext<ServerCommandSource> ctx) {
+
+        // Default vote command
+
+        double timeLeft = 0;
+        Config config = plugin.getConfig();
+        ServerCommandSource src = ctx.getSource();
+
+        if (config.autorestart.restartInterval > 0) {
+            timeLeft = (config.autorestart.restartInterval * 3600) - ((double) (System.currentTimeMillis() - plugin.startTimestamp) / 1000);
+        } else if (plugin.nextRealTimeRestart > 0){
+            timeLeft = (plugin.nextRealTimeRestart) - ((double) (System.currentTimeMillis() - plugin.startTimestamp) / 1000);
+        }
+        int hours = (int) (timeLeft / 3600);
+        int minutes = (int) ((timeLeft - hours * 3600) / 60);
+
+        if (!Permissions.check(src, RebootPermisssions.BYPASS, 4) && !Permissions.check(src, RebootPermisssions.COMMAND_VOTE, 4)) {
+            throw new CommandException(Main.fromPlaceholderAPI(Messages.getErrorNoPermission()));
+        }
+        if (!Permissions.check(src, RebootPermisssions.BYPASS, 4) && !config.voting.voteEnabled) {
+            throw new CommandException(Main.fromPlaceholderAPI(Messages.getErrorVoteToRestartDisabled()));
+        }
+        if (src.getEntity() instanceof PlayerEntity && plugin.hasVoted.contains(src.getEntity().getUuid())) {
+            throw new CommandException(Main.fromPlaceholderAPI(Messages.getErrorAlreadyVoted()));
+        }
+        if (plugin.voteStarted) {
+            throw new CommandException(Main.fromPlaceholderAPI(Messages.getErrorVoteAlreadyRunning()));
+        }
+        if (!Permissions.check(src, RebootPermisssions.BYPASS) && plugin.justStarted) {
+            throw new CommandException(Main.fromPlaceholderAPI(Messages.getErrorNotOnlineLongEnough()));
+        }
+        if (!Permissions.check(src, RebootPermisssions.BYPASS) && plugin.getOnlinePlayerCount() < config.timer.timerMinplayers) {
+            throw new CommandException(Main.fromPlaceholderAPI(Messages.getErrorMinPlayers()));
+        }
+        if (plugin.isRestarting && timeLeft != 0 && (hours == 0 && minutes <= 10)) {
+            throw new CommandException(Main.fromPlaceholderAPI(Messages.getErrorAlreadyRestarting()));
+        }
+        if (plugin.cdTimer) {
+            throw new CommandException(Main.fromPlaceholderAPI(Messages.getErrorWaitTime()));
+        }
+
+        if (src.getEntity() instanceof PlayerEntity player) {
+            plugin.voteStarted = true;
+            plugin.voteCancel = false;
+            plugin.hasVoted.add(player.getUuid());
+            plugin.yesVotes += 1;
+            plugin.noVotes = 0;
+            plugin.voteSeconds = 90;
+            plugin.displayVotes();
+        } else {
+            plugin.voteStarted = true;
+            plugin.displayVotes();
+        }
+
+        List<Text> contents = new ArrayList<>();
+        List<String> broadcast = Messages.getRestartVoteBroadcast();
+        if (broadcast != null) {
+            for (String line : broadcast) {
+                String checkLine = line.replace("%playername$", src.getName()).replace("%config.timerminplayers%", String.valueOf(config.timer.timerMinplayers));
+                contents.add(Main.fromPlaceholderAPI(checkLine));
+            }
+        }
+
+        if (!contents.isEmpty()) {
+            for (Text line : contents) {
+                plugin.broadcastMessage(line);
+            }
+        }
+
+        plugin.getTaskManager().scheduleSingleTask(() -> {
+                int Online = plugin.getOnlinePlayerCount();
+                int percentage = plugin.yesVotes/Online *100;
+
+                boolean yesAboveNo = plugin.yesVotes > plugin.noVotes;
+                boolean yesAboveMin = plugin.yesVotes >= config.timer.timerMinplayers;
+                boolean requiredPercent = percentage >= config.timer.timerVotepercent;
+
+                if (yesAboveNo && yesAboveMin && !plugin.voteCancel && requiredPercent) {
+                    plugin.isRestarting = true;
+                    config.autorestart.restartInterval = (config.timer.timerVotepassed + 1) / 3600.0;
+                    Main.logger.info("[MMCReboot] scheduling restart tasks...");
+                    plugin.reason = Messages.getRestartPassed();
+                    plugin.scheduleTasks();
+                } else {
+                    if (!plugin.voteCancel) {
+                        plugin.broadcastMessage("<white>[</white><gold>Restart</gold><white>] </white>" + Messages.getRestartVoteNotEnoughVoted());
+                    }
+                    plugin.voteCancel = false;
+                    plugin.getTaskManager().scheduleSingleTask(() -> plugin.cdTimer = false, 60, TimeUnit.SECONDS);
+                }
+                plugin.removeScoreboard();
+                plugin.removeBossBar();
+                plugin.yesVotes = 0;
+                plugin.cdTimer = true;
+                plugin.voteStarted = false;
+                plugin.hasVoted.clear();
+        }, 90, TimeUnit.SECONDS);
+        return 1;
+    }
+
+    public int executeSubcommand(CommandContext<ServerCommandSource> ctx) {
 
         Config config = plugin.getConfig();
+        ServerCommandSource src = ctx.getSource();
 
-        // TODO problem for later....
-        /*
-        Optional<String> optional = args.getOne("optional");
+        String op = StringArgumentType.getString(ctx, "op");
 
-        if (optional.isPresent()) {
-            String op = optional.get();
             switch (op) {
                 case "on":
-                    if (Permissions.check(src, RebootPermisssions.TOGGLE_VOTE)) {
+                    if (Permissions.check(src, RebootPermisssions.TOGGLE_VOTE, 4)) {
                         config.voting.voteEnabled = true;
                         return 1;
                     } else {
@@ -40,7 +139,7 @@ public class RebootVote {
                     }
 
                 case "off":
-                    if (Permissions.check(src, RebootPermisssions.TOGGLE_VOTE)) {
+                    if (Permissions.check(src, RebootPermisssions.TOGGLE_VOTE, 4)) {
                         config.voting.voteEnabled = false;
                         return 1;
                     } else {
@@ -48,8 +147,9 @@ public class RebootVote {
                     }
 
                 case "yes":
-                    if (plugin.hasVoted.contains(src)) {
-                        throw new CommandException(Main.fromLegacy(Messages.getErrorAlreadyVoted()));
+                    if (src.getEntity() instanceof PlayerEntity && plugin.hasVoted.contains(src.getEntity().getUuid())) {
+                        src.sendError(Main.fromPlaceholderAPI(Messages.getErrorAlreadyVoted()));
+                        return -1;
                     }
                     if (plugin.voteStarted) {
                         plugin.yesVotes += 1;
@@ -60,12 +160,14 @@ public class RebootVote {
                         plugin.sendMessage(src, Messages.getVotedYes());
                         return 1;
                     } else {
-                        throw new CommandException(Main.fromLegacy(Messages.getErrorNoVoteRunning()));
+                        src.sendError(Main.fromPlaceholderAPI(Messages.getErrorNoVoteRunning()));
+                        return -1;
                     }
 
                 case "no":
-                    if (plugin.hasVoted.contains(src)) {
-                        throw new CommandException(Main.fromLegacy(Messages.getErrorAlreadyVoted()));
+                    if (src.getEntity() instanceof PlayerEntity && plugin.hasVoted.contains(src.getEntity().getUuid())) {
+                        src.sendError(Main.fromPlaceholderAPI(Messages.getErrorAlreadyVoted()));
+                        return -1;
                     }
                     if (plugin.voteStarted) {
                         plugin.noVotes += 1;
@@ -77,7 +179,8 @@ public class RebootVote {
                         return 1;
 
                     } else {
-                        throw new CommandException(Main.fromLegacy(Messages.getErrorNoVoteRunning()));
+                        src.sendError(Main.fromPlaceholderAPI(Messages.getErrorNoVoteRunning()));
+                        return -1;
                     }
 
                 default:
@@ -86,118 +189,8 @@ public class RebootVote {
 
             }
 
-        }*/
 
-        // Default vote command
 
-            double timeLeft = 0;
-            if (config.autorestart.restartInterval > 0) {
-                timeLeft = (config.autorestart.restartInterval * 3600) - ((double) (System.currentTimeMillis() - plugin.startTimestamp) / 1000);
-            } else if (plugin.nextRealTimeRestart > 0){
-                timeLeft = (plugin.nextRealTimeRestart) - ((double) (System.currentTimeMillis() - plugin.startTimestamp) / 1000);
-            }
-            int hours = (int) (timeLeft / 3600);
-            int minutes = (int) ((timeLeft - hours * 3600) / 60);
-
-            if (!Permissions.check(src, RebootPermisssions.BYPASS) && !Permissions.check(src, RebootPermisssions.COMMAND_VOTE)) {
-                throw new CommandException(Main.fromLegacy(Messages.getErrorNoPermission()));
-            }
-            if (!Permissions.check(src, RebootPermisssions.BYPASS) && !config.voting.voteEnabled) {
-                throw new CommandException(Main.fromLegacy(Messages.getErrorVoteToRestartDisabled()));
-            }
-            if (src.getEntity() instanceof PlayerEntity && plugin.hasVoted.contains(src.getEntity().getUuid())) {
-                throw new CommandException(Main.fromLegacy(Messages.getErrorAlreadyVoted()));
-            }
-            if (plugin.voteStarted) {
-                throw new CommandException(Main.fromLegacy(Messages.getErrorVoteAlreadyRunning()));
-            }
-            if (!Permissions.check(src, RebootPermisssions.BYPASS) && plugin.justStarted) {
-                throw new CommandException(Main.fromLegacy(Messages.getErrorNotOnlineLongEnough()));
-            }
-            if (!Permissions.check(src, RebootPermisssions.BYPASS) && plugin.getOnlinePlayerCount() < config.timer.timerMinplayers) {
-                throw new CommandException(Main.fromLegacy(Messages.getErrorMinPlayers()));
-            }
-            if (plugin.isRestarting && timeLeft != 0 && (hours == 0 && minutes <= 10)) {
-                throw new CommandException(Main.fromLegacy(Messages.getErrorAlreadyRestarting()));
-            }
-            if (plugin.cdTimer) {
-                throw new CommandException(Main.fromLegacy(Messages.getErrorWaitTime()));
-            }
-
-            if (src.getEntity() instanceof PlayerEntity player) {
-                plugin.voteStarted = true;
-                plugin.voteCancel = false;
-                plugin.hasVoted.add(player.getUuid());
-                plugin.yesVotes += 1;
-                plugin.noVotes = 0;
-                plugin.voteSeconds = 90;
-                plugin.displayVotes();
-            } else {
-                plugin.voteStarted = true;
-                plugin.displayVotes();
-            }
-
-            //PaginationService paginationService = Sponge.getServiceManager().provide(PaginationService.class).get();
-            List<Text> contents = new ArrayList<>();
-            List<String> broadcast = Messages.getRestartVoteBroadcast();
-            if (broadcast != null) {
-                for (String line : broadcast) {
-                    String checkLine = line.replace("%playername$", src.getName()).replace("%config.timerminplayers%", String.valueOf(config.timer.timerMinplayers));
-                    contents.add(Main.fromLegacy(checkLine));
-                }
-            }
-
-            if (!contents.isEmpty()) {
-                /*
-                paginationService.builder()
-                        .title(plugin.fromLegacy("Restart"))
-                        .contents(contents)
-                        .padding(Text.of("="))
-                        .sendTo(MessageChannel.TO_ALL.getMembers());
-                */
-                for (Text line : contents) {
-                    plugin.broadcastMessage(line);
-                }
-            }
-
-            Timer voteTimer = new Timer();
-            voteTimer.schedule(new TimerTask() {
-                public void run() {
-                    int Online = plugin.getOnlinePlayerCount();
-                    int percentage = plugin.yesVotes/Online *100;
-
-                    Config config = plugin.getConfig();
-                    boolean yesAboveNo = plugin.yesVotes > plugin.noVotes;
-                    boolean yesAboveMin = plugin.yesVotes >= config.timer.timerMinplayers;
-                    boolean requiredPercent = percentage >= config.timer.timerVotepercent;
-
-                    if (yesAboveNo && yesAboveMin && !plugin.voteCancel && requiredPercent) {
-                        plugin.isRestarting = true;
-                        config.autorestart.restartInterval = (config.timer.timerVotepassed + 1) / 3600.0;
-                        Main.logger.info("[MMCReboot] scheduling restart tasks...");
-                        plugin.reason = Messages.getRestartPassed();
-                        plugin.scheduleTasks();
-                    } else {
-                        if (!plugin.voteCancel) {
-                            plugin.broadcastMessage("&f[&6Restart&f] " + Messages.getRestartVoteNotEnoughVoted());
-                        }
-                        plugin.voteCancel = false;
-                        Timer voteTimer = new Timer();
-                        voteTimer.schedule(new TimerTask() {
-                            public void run() {
-                                plugin.cdTimer = false;
-                            }
-                        }, (long) (config.timer.timerRevote * 60000.0));
-                    }
-                    plugin.removeScoreboard();
-                    plugin.removeBossBar();
-                    plugin.yesVotes = 0;
-                    plugin.cdTimer = true;
-                    plugin.voteStarted = false;
-                    plugin.hasVoted.clear();
-                }
-            }, 90000);
-            return 1;
 
     }
 }

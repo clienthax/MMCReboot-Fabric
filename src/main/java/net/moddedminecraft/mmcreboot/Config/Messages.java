@@ -1,13 +1,8 @@
 package net.moddedminecraft.mmcreboot.Config;
 
-import com.google.common.reflect.TypeToken;
 import net.minecraft.util.Identifier;
 import net.moddedminecraft.mmcreboot.Main;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 
 public class Messages extends me.fzzyhmstrs.fzzy_config.config.Config {
@@ -35,21 +30,21 @@ public class Messages extends me.fzzyhmstrs.fzzy_config.config.Config {
     }
 
     private static String[] restartVoteBroadcastDefault = {
-            "&a%playername$ &bhas voted that the server should be restarted",
-            "&6Type &a/reboot vote yes &6if you agree",
-            "&6Type &c/reboot vote no &6if you do not agree",
-            "&6If there are more yes votes than no, The server will be restarted! (minimum of %config.timerminplayers%)",
-            "&bYou have &a90 &bseconds to vote!"
+            "<green>%playername$ </green><aqua>has voted that the server should be restarted</aqua>",
+            "<gold>Type </gold><green>/reboot vote yes </green><gold>if you agree</gold>",
+            "<gold>Type </gold><red>/reboot vote no </red><gold>if you do not agree</gold>",
+            "<gold>If there are more yes votes than no, The server will be restarted! (minimum of %config.timerminplayers%)</gold>",
+            "<aqua>You have </aqua><green>90 </green><aqua>seconds to vote!</aqua>"
     };
 
     private static String[] restartVoteBroadcastOnLoginDefault = {
-            "&3There is a vote to restart the server.",
-            "&6Type &a/reboot vote yes &6if you agree",
-            "&6Type &c/reboot vote no &6if you do not agree",
-            "&6If there are more yes votes than no, The server will be restarted! (minimum of %config.timerminplayers%)"
+            "<dark_aqua>There is a vote to restart the server.</dark_aqua>",
+            "<gold>Type </gold><green>/reboot vote yes </green><gold>if you agree</gold>",
+            "<gold>Type </gold><red>/reboot vote no </red><gold>if you do not agree</gold>",
+            "<gold>If there are more yes votes than no, The server will be restarted! (minimum of %config.timerminplayers%)</gold>"
     };
 
-    private static String chatprefix = "&f[&6MMCReboot&f] ";
+    private static String chatprefix = "<white>[</white><gold>MMCReboot</gold><white>] </white>";
 
     //sidebar
     private static String sidebarTitle = "Restart Vote";
@@ -59,52 +54,51 @@ public class Messages extends me.fzzyhmstrs.fzzy_config.config.Config {
     private static String sidebarRestartTimerTitle = "Restart Timer";
 
     //error
-    private static String errorAlreadyVoted = "&4You have already voted!";
-    private static String errorNoVoteRunning = "&4There is no vote running at the moment";
-    private static String errorVoteToRestartDisabled = "&4Voting to restart is disabled";
-    private static String errorVoteAlreadyRunning = "&4A vote is already running";
-    private static String errorNotOnlineLongEnough = "&4The server needs to be online for %config.timerstartvote% minutes before starting a vote!";
-    private static String errorMinPlayers = "&4There must be a minimum of %config.timerminplayers% players online to start a vote";
-    private static String errorAlreadyRestarting = "&4The server is already restarting!";
-    private static String errorWaitTime = "&4You need to wait %config.timerrevote% minutes before starting another vote!";
-    private static String errorNoPermission = "&4You don't have permission to do this!";
-    private static String errorNoTaskScheduled = "&cThere is no restart scheduled!";
-    private static String errorTookTooLong = "&cYou took too long to confirm the reboot.";
-    private static String errorInvalidTimescale = "&cInvalid time scale!";
-    private static String errorNothingToConfirm = "&cThere is nothing to confirm.";
+    private static String errorAlreadyVoted = "<dark_red>You have already voted!</dark_red>";
+    private static String errorNoVoteRunning = "<dark_red>There is no vote running at the moment</dark_red>";
+    private static String errorVoteToRestartDisabled = "<dark_red>Voting to restart is disabled</dark_red>";
+    private static String errorVoteAlreadyRunning = "<dark_red>A vote is already running</dark_red>";
+    private static String errorNotOnlineLongEnough = "<dark_red>The server needs to be online for %config.timerstartvote% minutes before starting a vote!</dark_red>";
+    private static String errorMinPlayers = "<dark_red>There must be a minimum of %config.timerminplayers% players online to start a vote</dark_red>";
+    private static String errorAlreadyRestarting = "<dark_red>The server is already restarting!</dark_red>";
+    private static String errorWaitTime = "<dark_red>You need to wait %config.timerrevote% minutes before starting another vote!</dark_red>";
+    private static String errorNoPermission = "<dark_red>You don't have permission to do this!</dark_red>";
+    private static String errorNoTaskScheduled = "<red>There is no restart scheduled!</red>";
+    private static String errorTookTooLong = "<red>You took too long to confirm the reboot.</red>";
+    private static String errorInvalidTimescale = "<red>Invalid time scale!</red>";
+    private static String errorNothingToConfirm = "<red>There is nothing to confirm.</red>";
 
     //general
-    private static String restartCancel = "&3Restarts have been canceled.";
+    private static String restartCancel = "<dark_aqua>Restarts have been canceled.</dark_aqua>";
     private static String restartPassed = "Players have voted to restart the server.";
-    private static String restartVoteNotEnoughVoted = "&3The server will not be restarted. Not enough people have voted.";
+    private static String restartVoteNotEnoughVoted = "<dark_aqua>The server will not be restarted. Not enough people have voted.</dark_aqua>";
     private static String votedYes = "You Voted Yes!";
     private static String votedNo = "You Voted No!";
-    private static String restartMessageWithReason = "&3The server will now be restarting in &f%hours%h%minutes%m%seconds%s &3with the reason:";
-    private static String restartMessageWithoutReason = "&3The server will now be restarting in &f%hours%h%minutes%m%seconds%s";
-    private static String restartFormatMessage = "&bUse 'h' for time in hours, 'm' for minutes and 's' for seconds";
-    private static String restartConfirm = "&cOk, you asked for it!";
-    private static String restartConfirmMessage = "&cPlease type: &6/Reboot Confirm &cif you are sure you want to do this.";
+    private static String restartMessageWithReason = "<dark_aqua>The server will now be restarting in </dark_aqua><white>%hours%h%minutes%m%seconds%s </white><dark_aqua>with the reason:</dark_aqua>";
+    private static String restartMessageWithoutReason = "<dark_aqua>The server will now be restarting in </dark_aqua><white>%hours%h%minutes%m%seconds%s</white>";
+    private static String restartFormatMessage = "<aqua>Use 'h' for time in hours, 'm' for minutes and 's' for seconds</aqua>";
+    private static String restartConfirm = "<red>Ok, you asked for it!</red>";
+    private static String restartConfirmMessage = "<red>Please type: </red><gold>/Reboot Confirm </gold><red>if you are sure you want to do this.</red>";
 
     //vote notification
     private static List<String> restartVoteBroadcast;
     private static List<String> restartVoteBroadcastOnLogin;
 
     //restart notification
-    private static String restartNotificationMinutes = "&bThe server will be restarting in &f%minutes%:%seconds% &bminutes";
-    private static String restartNotificationMinute = "&bThe server will be restarting in &f%minutes% &bminute";
-    private static String restartNotificationSeconds = "&bThe server will be restarting in &f%seconds% &bseconds";
+    private static String restartNotificationMinutes = "<aqua>The server will be restarting in </aqua><white>%minutes%:%seconds% </white><aqua>minutes</aqua>";
+    private static String restartNotificationMinute = "<aqua>The server will be restarting in </aqua><white>%minutes% </white><aqua>minute</aqua>";
+    private static String restartNotificationSeconds = "<aqua>The server will be restarting in </aqua><white>%seconds% </white><aqua>seconds</aqua>";
 
     //help
-    private static String helpHeader = "&3[] = required  () = optional";
-    private static String helpHelp = "&3/reboot &bhelp - &7shows this help";
-    private static String helpNow = "&3/reboot &bnow - &7restarts the server instantly";
-    private static String helpStart = "&3/reboot start &7[&bh&7|&bm&7|&bs&7] &7[&btime&7] &7(&breason&7) &b- &7restart the server after a given time";
-    private static String helpCancel = "&3/reboot &bcancel - &7cancel any current restart timer";
-    private static String helpVote = "&3/reboot &bvote - &7starts a vote to restart the server";
-    private static String helpTime = "&3/reboot &btime - &7informs you how much time is left before restarting";
-    private static String helpVoteYea = "&3/reboot &bvote yes - &7vote yes to restart the server";
-    private static String helpVoteNo = "&3/reboot &bvote no - &7vote no to restart the server";
-
+    private static String helpHeader = "<dark_aqua>[] = required  () = optional</dark_aqua>";
+    private static String helpHelp = "<dark_aqua>/reboot </dark_aqua><aqua>help - </aqua><gray>shows this help</gray>";
+    private static String helpNow = "<dark_aqua>/reboot </dark_aqua><aqua>now - </aqua><gray>restarts the server instantly</gray>";
+    private static String helpStart = "<dark_aqua>/reboot start </dark_aqua><gray>[</gray><aqua>h</aqua><gray>|</gray><aqua>m</aqua><gray>|</gray><aqua>s</aqua><gray>] </gray><gray>[</gray><aqua>time</aqua><gray>] </gray><gray>(</gray><aqua>reason</aqua><gray>) </gray><aqua>- </aqua><gray>restart the server after a given time</gray>";
+    private static String helpCancel = "<dark_aqua>/reboot </dark_aqua><aqua>cancel - </aqua><gray>cancel any current restart timer</gray>";
+    private static String helpVote = "<dark_aqua>/reboot </dark_aqua><aqua>vote - </aqua><gray>starts a vote to restart the server</gray>";
+    private static String helpTime = "<dark_aqua>/reboot </dark_aqua><aqua>time - </aqua><gray>informs you how much time is left before restarting</gray>";
+    private static String helpVoteYea = "<dark_aqua>/reboot </dark_aqua><aqua>vote yes - </aqua><gray>vote yes to restart the server</gray>";
+    private static String helpVoteNo = "<dark_aqua>/reboot </dark_aqua><aqua>vote no - </aqua><gray>vote no to restart the server</gray>";
 
 /*
 

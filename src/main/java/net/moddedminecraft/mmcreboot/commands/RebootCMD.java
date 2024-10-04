@@ -18,11 +18,18 @@ public class RebootCMD {
         plugin = instance;
     }
 
-    public int execute(ServerCommandSource src, CommandContext args) {
+    public int execute(CommandContext<ServerCommandSource> ctx) {
 
-        String timeValue = StringArgumentType.getString(args, "h/m/s");
-        int timeAmount = IntegerArgumentType.getInteger(args, "time");
-        String reasonOP = StringArgumentType.getString(args, "reason");
+        String timeValue = StringArgumentType.getString(ctx, "unit");
+        int timeAmount = IntegerArgumentType.getInteger(ctx, "time");
+
+        // Optional reason
+        String reasonOP = "";
+        try {
+            reasonOP = StringArgumentType.getString(ctx, "reason");
+        } catch (IllegalArgumentException ignored) {
+        }
+
         double restartTime;
 
         if (!reasonOP.isBlank()) {
@@ -42,15 +49,15 @@ public class RebootCMD {
                 restartTime = timeAmount;
                 break;
             default:
-                plugin.sendMessage(src, Messages.getRestartFormatMessage());
-                src.sendMessage(Text.of(""));
-                throw new CommandException(Main.fromLegacy(Messages.getErrorInvalidTimescale()));
+                plugin.sendMessage(ctx.getSource(), Messages.getRestartFormatMessage());
+                ctx.getSource().sendMessage(Text.of(""));
+                throw new CommandException(Main.fromPlaceholderAPI(Messages.getErrorInvalidTimescale()));
         }
 
-        Main.logger.info("[MMCReboot] " + src.getName() + " is setting a new restart time...");
+        Main.logger.info("[MMCReboot] " + ctx.getSource().getName() + " is setting a new restart time...");
 
         if(plugin.tasksScheduled) {
-            plugin.cancelTasks();
+            plugin.cancelRebootTimerTasks();
         }
 
         Config config = plugin.getConfig();
@@ -72,13 +79,13 @@ public class RebootCMD {
         int seconds = (int)timeLeft % 60;
 
         if (!reasonOP.isBlank()) {
-            plugin.sendMessage(src, Messages.getRestartMessageWithReason()
+            plugin.sendMessage(ctx.getSource(), Messages.getRestartMessageWithReason()
                     .replace("%hours%", String.valueOf(hours))
                     .replace("%minutes%", String.valueOf(minutes))
                     .replace("%seconds%", String.valueOf(seconds)));
-            plugin.sendMessage(src, "&6" + plugin.reason);
+            plugin.sendMessage(ctx.getSource(), "<gold>" + plugin.reason+"</gold>");
         } else {
-            plugin.sendMessage(src, Messages.getRestartMessageWithoutReason()
+            plugin.sendMessage(ctx.getSource(), Messages.getRestartMessageWithoutReason()
                     .replace("%hours%", String.valueOf(hours))
                     .replace("%minutes%", String.valueOf(minutes))
                     .replace("%seconds%", String.valueOf(seconds)));
