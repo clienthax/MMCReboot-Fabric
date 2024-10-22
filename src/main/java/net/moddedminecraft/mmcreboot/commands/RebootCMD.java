@@ -43,7 +43,7 @@ public class RebootCMD {
                 restartTime = timeAmount * 3600;
                 break;
             case "m":
-                restartTime = (timeAmount * 60) + 1;
+                restartTime = (timeAmount * 60);
                 break;
             case "s":
                 restartTime = timeAmount;

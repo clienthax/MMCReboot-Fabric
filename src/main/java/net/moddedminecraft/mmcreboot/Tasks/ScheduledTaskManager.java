@@ -6,77 +6,79 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
-// TODO add support for 'realtime' tasks that don't rely on ticks, or account for skipped ticks
 public class ScheduledTaskManager {
 
-    private final Map<Runnable, Long> tasks = new ConcurrentHashMap<>();
-    private final Map<Runnable, Long> initialDelays = new ConcurrentHashMap<>();
+    private final Map<Runnable, Long> tasks = new ConcurrentHashMap<>(); // Maps tasks to their period (in ms)
+    private final Map<Runnable, Long> nextExecutionTimes = new ConcurrentHashMap<>(); // Maps tasks to the next execution timestamp
     private final List<Runnable> tasksToRemove = new CopyOnWriteArrayList<>();
     private boolean clearAllRequested = false;
 
-    // Add a task to be run after delay and then periodically
+    // Schedule a repeating task based on real time
     public void scheduleRepeatingTask(Runnable task, double delay, double period, TimeUnit unit) {
-        long delayInTicks = convertToTicks(delay, unit); // Convert delay to ticks
-        long periodInTicks = convertToTicks(period, unit); // Convert period to ticks
-        tasks.put(task, periodInTicks);
-        initialDelays.put(task, delayInTicks);
+        long delayInMillis = convertToMillis(delay, unit);
+        long periodInMillis = convertToMillis(period, unit);
+        long nextExecutionTime = System.currentTimeMillis() + delayInMillis;
+
+        tasks.put(task, periodInMillis);
+        nextExecutionTimes.put(task, nextExecutionTime);
     }
 
-    // Add a task to be run only once after a delay
+    // Schedule a single execution task based on real time
     public void scheduleSingleTask(Runnable task, double delay, TimeUnit unit) {
-        long delayInTicks = convertToTicks(delay, unit); // Convert delay to ticks
-        tasks.put(task, 0L);  // period 0 means run once
-        initialDelays.put(task, delayInTicks);
+        long delayInMillis = convertToMillis(delay, unit);
+        long nextExecutionTime = System.currentTimeMillis() + delayInMillis;
+
+        tasks.put(task, 0L); // 0 period means it runs only once
+        nextExecutionTimes.put(task, nextExecutionTime);
     }
 
-    // Called every tick to check and run tasks
+    // Called periodically (e.g., once per tick) to check and run tasks
     public void tick() {
         if (clearAllRequested) {
             tasks.clear();
-            initialDelays.clear();
+            nextExecutionTimes.clear();
             clearAllRequested = false;
-            return; // Skip the rest of the tick processing if tasks are being cleared
+            return;
         }
 
+        long currentTime = System.currentTimeMillis();
+
         tasks.forEach((task, period) -> {
-            long delay = initialDelays.get(task);
-            if (delay <= 0) {
+            long nextExecutionTime = nextExecutionTimes.get(task);
+            if (currentTime >= nextExecutionTime) {
                 task.run();  // Execute the task
+
                 if (period > 0) {
-                    initialDelays.put(task, period);  // Reset delay to period for the next execution
+                    nextExecutionTimes.put(task, currentTime + period);  // Schedule the next execution
                 } else {
-                    tasksToRemove.add(task);  // Mark task for removal if it doesn't repeat
+                    tasksToRemove.add(task);  // Mark non-repeating tasks for removal
                 }
-            } else {
-                initialDelays.put(task, delay - 1);  // Decrease the delay
             }
         });
 
-        // Remove tasks that have completed and should not repeat
+        // Remove completed tasks
         for (Runnable task : tasksToRemove) {
             tasks.remove(task);
-            initialDelays.remove(task);
+            nextExecutionTimes.remove(task);
         }
-        tasksToRemove.clear();  // Clear the list of tasks to remove
+        tasksToRemove.clear();
     }
 
     public void clearAllTasks() {
         clearAllRequested = true;
     }
 
-    // TimeUnit.toSeconds() is completely useless as it doesn't handle decimal values correctly
-    public long convertToTicks(double delay, TimeUnit unit) {
-        double delayInSeconds = switch (unit) {
-            case HOURS -> delay * 3600;
-            case MINUTES -> delay * 60;
-            case SECONDS -> delay;
-            case MILLISECONDS -> delay / 1000;
-            case MICROSECONDS -> delay / 1_000_000;
-            case NANOSECONDS -> delay / 1_000_000_000;
+    // Convert various time units to milliseconds
+    public long convertToMillis(double time, TimeUnit unit) {
+        return switch (unit) {
+            case HOURS -> (long) (time * 3600000);
+            case MINUTES -> (long) (time * 60000);
+            case SECONDS -> (long) (time * 1000);
+            case MILLISECONDS -> (long) time;
+            case MICROSECONDS -> (long) (time / 1000);
+            case NANOSECONDS -> (long) (time / 1_000_000);
             default -> throw new IllegalArgumentException("Unsupported TimeUnit: " + unit);
         };
-
-        return (long) (delayInSeconds * 20); // Convert seconds to ticks
     }
 
     public void removeTasks(List<Runnable> rebootTimerTasks) {

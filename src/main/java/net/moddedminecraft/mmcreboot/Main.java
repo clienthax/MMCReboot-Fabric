@@ -387,6 +387,7 @@ public class Main implements ModInitializer {
             if (aTimerBroadcast <= rInterval) {
                 Runnable runnable = () -> {
                     double timeLeft = rInterval - ((double) (System.currentTimeMillis() - startTimestamp) / 1000);
+                    timeLeft += 1; // Hack for the 1 tick delay in the scheduler
                     int hours = (int) (timeLeft / 3600);
                     int minutes = (int) ((timeLeft - hours * 3600) / 60);
                     int seconds = (int) timeLeft % 60;
@@ -457,9 +458,7 @@ public class Main implements ModInitializer {
         Identifier sound = new Identifier(config.timer.playSoundString);
         SoundEvent soundEvent = SoundEvent.of(sound);
 
-        for (World world : server.getWorlds()) {
-                world.playSound(null, soundLocX, soundLocY, soundLocZ, soundEvent, SoundCategory.MASTER, 1, 1);
-        }
+        server.getPlayerManager().getPlayerList().forEach(player -> player.playSound(soundEvent, SoundCategory.MASTER, 1, 1));
     }
 
     public void cancelRebootTimerTasks() {
@@ -548,25 +547,35 @@ public class Main implements ModInitializer {
         int minutes = (int)((timeLeft - hours * 3600) / 60);
         int seconds = (int)timeLeft % 60;
 
+        // Only show minutes if it's less than 5 minutes
+        if (minutes >= 5 && hours != 0) {
+            return;
+        }
+
         NumberFormat formatter = new DecimalFormat("00");
         String s = formatter.format(seconds);
 
-        board = new Scoreboard();
-        ScoreboardObjective obj = board.addObjective("restart", ScoreboardCriterion.DUMMY, Text.of(Messages.getSidebarRestartTimerTitle()), ScoreboardCriterion.RenderType.INTEGER);
+        board = server.getScoreboard();//new Scoreboard();
+
+        ScoreboardObjective obj;
+        if (board.getObjective("restart") != null) {
+            obj = board.getObjective("restart");
+            board.removeObjective(obj);
+        }
+        obj = board.addObjective("restart", ScoreboardCriterion.DUMMY, Text.of(Messages.getSidebarRestartTimerTitle()), ScoreboardCriterion.RenderType.INTEGER);
 
         board.setObjectiveSlot(Scoreboard.SIDEBAR_DISPLAY_SLOT_ID, obj);
         board.getPlayerScore(Text.literal(minutes +":" + s).formatted(Formatting.GREEN).getString(), obj).setScore(0);
 
         // Boss bar
-        int mSec = (minutes * 60);
-        double val = ((double) ((mSec + seconds) * 100) / 300);
-        float percent = (float)val / 100.0f;
+        int totalTimeLeftInSeconds = (hours * 3600) + (minutes * 60) + seconds;
+        float percent = (float) ((float) totalTimeLeftInSeconds / rInterval * 100.0f);
 
         if (config.bossBar.bossbarEnabled) {
             if (bar == null) {
                 bar = new ServerBossBar(Text.of(config.bossBar.bossbarTitle.replace("{minutes}", Integer.toString(minutes)).replace("{seconds}", s)), BossBar.Color.GREEN, BossBar.Style.PROGRESS);
             } else {
-                bar.setPercent(percent);
+                bar.setPercent(percent/100f);
             }
         }
 
@@ -585,6 +594,7 @@ public class Main implements ModInitializer {
             board = new Scoreboard();
         }
 
+        // TODO test this
         ScoreboardObjective obj = board.addObjective("vote", ScoreboardCriterion.DUMMY, Text.of(Messages.getSidebarTitle()), ScoreboardCriterion.RenderType.INTEGER);
         board.getPlayerScore(Messages.getSidebarYes() + ":", obj).setScore(yesVotes);
         board.getPlayerScore(Messages.getSidebarNo() + ":", obj).setScore(noVotes);
@@ -601,16 +611,17 @@ public class Main implements ModInitializer {
 
     public void removeBossBar() {
         if (bar != null) {
-            bar.getPlayers().forEach(bar::removePlayer);
+            bar.clearPlayers();
         }
     }
 
     public void broadcastMessage(String message) {
-        server.sendMessage(fromPlaceholderAPI(message));
+        Text text = fromPlaceholderAPI(message);
+        server.getPlayerManager().getPlayerList().forEach(player -> player.sendMessage(text));
     }
 
     public void broadcastMessage(Text message) {
-        server.sendMessage(message);
+        server.getPlayerManager().getPlayerList().forEach(player -> player.sendMessage(message));
     }
 
     public void sendMessage(ServerCommandSource sender, String message) {
