@@ -548,7 +548,7 @@ public class Main implements ModInitializer {
         int seconds = (int)timeLeft % 60;
 
         // Only show minutes if it's less than 5 minutes
-        if (minutes >= 5 && hours != 0) {
+        if (!(minutes <= 5 && hours == 0)) {
             return;
         }
 
