@@ -547,15 +547,15 @@ public class Main implements ModInitializer {
         int minutes = (int)((timeLeft - hours * 3600) / 60);
         int seconds = (int)timeLeft % 60;
 
+        board = server.getScoreboard();
+
         // Only show minutes if it's less than 5 minutes
-        if (!(minutes <= 5 && hours == 0)) {
+        if (!(minutes <= 4 && hours == 0)) {
             return;
         }
 
         NumberFormat formatter = new DecimalFormat("00");
         String s = formatter.format(seconds);
-
-        board = server.getScoreboard();//new Scoreboard();
 
         ScoreboardObjective obj;
         if (board.getObjective("restart") != null) {
@@ -569,7 +569,10 @@ public class Main implements ModInitializer {
 
         // Boss bar
         int totalTimeLeftInSeconds = (hours * 3600) + (minutes * 60) + seconds;
-        float percent = (float) ((float) totalTimeLeftInSeconds / rInterval * 100.0f);
+        int maxTime = 300; // 5 minutes
+        int effectiveInterval = (int) Math.min(rInterval, maxTime); // Account for < 5m restarts
+        int timeConsidered = Math.min(totalTimeLeftInSeconds, effectiveInterval);
+        float percent = (float) timeConsidered / effectiveInterval * 100.0f;
 
         if (config.bossBar.bossbarEnabled) {
             if (bar == null) {
@@ -650,6 +653,17 @@ public class Main implements ModInitializer {
 
     public ScheduledTaskManager getTaskManager() {
         return ((ServerTickMixinAccessor) server).getTaskManager();
+    }
+
+    public void clearScoreboard() {
+        board = server.getScoreboard();
+        if (board != null) {
+            // Clear restart scoreboard as its persisted otherwise
+            ScoreboardObjective obj;
+            if ((obj = board.getObjective("restart")) != null) {
+                board.removeObjective(obj);
+            }
+        }
     }
 
 }

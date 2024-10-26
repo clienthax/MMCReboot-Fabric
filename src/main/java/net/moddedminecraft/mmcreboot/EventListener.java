@@ -1,6 +1,7 @@
 package net.moddedminecraft.mmcreboot;
 
 import net.fabricmc.fabric.api.networking.v1.PacketSender;
+import net.minecraft.scoreboard.ScoreboardObjective;
 import net.minecraft.server.network.ServerPlayNetworkHandler;
 import net.minecraft.text.Text;
 import net.moddedminecraft.mmcreboot.Config.Config;
@@ -18,6 +19,9 @@ public class EventListener {
     }
 
     public void onPlayerLogin(ServerPlayNetworkHandler event, PacketSender player) {
+
+        plugin.clearScoreboard();
+
         if (plugin.voteStarted) {
             plugin.getTaskManager().scheduleSingleTask(() -> {
                 List<Text> contents = new ArrayList<>();
